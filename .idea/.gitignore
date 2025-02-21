@@ -1,0 +1,11 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+/.idea/
+/.venv/
+/misc.xml
+/modules.xml
+/inspectionProfiles/profiles_settings.xml
+/inspectionProfiles/Project_Default.xml
+/Spectro_SKK_public.iml
+/vcs.xml
