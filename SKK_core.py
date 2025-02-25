@@ -98,9 +98,10 @@ class SKKModel:
             The computed refractive index n as per the given inputs and formula logic.
         """
         try:
-            # if for any reason lambda_reference and lambda_current are equal, we immediately return self.n_reference
-            # these conditions are a mathematical restriction on the applicability of further formulas,
-            # so we have included the case of self.lambda_reference + self.lambda_current there as well
+            # If for any reason lambda_reference and lambda_current are equal, we immediately return self.n_reference.
+            """These conditions are a mathematical restriction on the applicability of further formulas,
+            so we have included the case of self.lambda_reference == - self.lambda_current there as well
+            even if it doesn't physically make sense."""
             if self.lambda_reference - self.lambda_current == 0 or self.lambda_reference + self.lambda_current == 0:
                 return self.n_reference
 
@@ -109,48 +110,61 @@ class SKKModel:
                 self.wavelength, self.k_array = self.wavelength_and_k_extend()
 
             # prepare arrays for computation
-            # Here we split the data for wavelength and k into two arrays. Since we represent k as a
-            # piecewise-defined function (see doc-string to this function), each piece will have a beginning
-            # and an end. All start points are collected into arrays with start suffixes and all end points
-            # into arrays with end suffixes.
-            # We drop the boundary points here because mathematically the formulas below contain a singularity
-            # in them and since the experimental data is cut off here, we have no way to get around this problem
-            # any other way.
-            wavelength_start = np.delete(self.wavelength, -1)
-            wavelength_end = np.delete(self.wavelength, 0)
+            """Here we split the data for wavelength and k into two arrays. Since we represent k as a
+            piecewise-defined function (see doc-string to this function), each piece will have a start
+            and an end. All start points are collected into arrays with _start suffixes and all end points
+            into arrays with _end suffixes."""
+            wavelength_start = np.delete(self.wavelength, -1)  # start points are all points except the last one, which cannot be a start, only an end
+            wavelength_end = np.delete(self.wavelength, 0)  # end points are all points except the first, which cannot be an end, only a start
             k_start = np.delete(self.k_array, -1)
             k_end = np.delete(self.k_array, 0)
 
-            # extract inputs (as ne module cannot handle variables with self)
+            # extract inputs (as numexpr module cannot handle variables with self)
             lambda_reference = self.lambda_reference
             lambda_current = self.lambda_current
 
             # calculate integral
+            """
+            The symbolic representation of the result of SKK integral calculation can be divided into 
+            eight parts (parts 1 to 8). Here ne.evaluate creates np.array with the values for each 
+            adjacent pair of points k. Then all these values are summarized by np.sum.
+            
+            The expressions inside ne.evaluate have the form where(condition, value, formula). 
+            This means that when "condition" is met, the appropriate value should be "value", 
+            not what is obtained by evaluating "formula"; otherwise, "formula" should be calculated. 
+            The "condition" here is related to the occurrence of singularity. It can be shown that 
+            for each pair of adjacent segments of function k, these singularities annihilate each 
+            other. Therefore, here we simply set their contribution to zero.
+            
+            It should be noted that ne.evaluate is one of the fastest methods in Python when we need 
+            to substitute arrays of data into a symbolic formula. And numpy, as the most efficient 
+            way to represent these data arrays, is a classic solution.
+            """
             integral = 0
             # part 1
-            sum_array = ne.evaluate("where(wavelength_start - lambda_reference == 0, 0, -((-wavelength_end + lambda_reference) * k_start + k_end * (wavelength_start - lambda_reference)) * log(abs(wavelength_start - lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_start - lambda_reference == 0, 0, -((-wavelength_end + lambda_reference) * k_start + k_end * (wavelength_start - lambda_reference)) * log(abs(wavelength_start - lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 2
-            sum_array = ne.evaluate("where(wavelength_start - lambda_current == 0, 0, -((wavelength_end - lambda_current) * k_start - k_end * (wavelength_start - lambda_current)) *log(abs(wavelength_start - lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_start - lambda_current == 0, 0, -((wavelength_end - lambda_current) * k_start - k_end * (wavelength_start - lambda_current)) *log(abs(wavelength_start - lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 3
-            sum_array = ne.evaluate("where(wavelength_start + lambda_reference == 0, 0, -((-wavelength_end - lambda_reference) * k_start + k_end * (wavelength_start + lambda_reference)) * log(abs(wavelength_start + lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_start + lambda_reference == 0, 0, -((-wavelength_end - lambda_reference) * k_start + k_end * (wavelength_start + lambda_reference)) * log(abs(wavelength_start + lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 4
-            sum_array = ne.evaluate("where(wavelength_start + lambda_current == 0, 0, -((wavelength_end + lambda_current) * k_start - k_end * (wavelength_start + lambda_current)) * log(abs(wavelength_start + lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_start + lambda_current == 0, 0, -((wavelength_end + lambda_current) * k_start - k_end * (wavelength_start + lambda_current)) * log(abs(wavelength_start + lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 5
-            sum_array = ne.evaluate("where(wavelength_end - lambda_reference == 0, 0, ((-wavelength_end + lambda_reference) * k_start + k_end * (wavelength_start - lambda_reference)) * log(abs(wavelength_end - lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_end - lambda_reference == 0, 0, ((-wavelength_end + lambda_reference) * k_start + k_end * (wavelength_start - lambda_reference)) * log(abs(wavelength_end - lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 6
-            sum_array = ne.evaluate("where(wavelength_end - lambda_current == 0, 0, ((wavelength_end - lambda_current) * k_start - k_end * (wavelength_start - lambda_current)) * log(abs(wavelength_end - lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_end - lambda_current == 0, 0, ((wavelength_end - lambda_current) * k_start - k_end * (wavelength_start - lambda_current)) * log(abs(wavelength_end - lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 7
-            sum_array = ne.evaluate("where(wavelength_end + lambda_reference == 0, 0, ((-wavelength_end - lambda_reference) * k_start + k_end * (wavelength_start + lambda_reference)) * log(abs(wavelength_end + lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_end + lambda_reference == 0, 0, ((-wavelength_end - lambda_reference) * k_start + k_end * (wavelength_start + lambda_reference)) * log(abs(wavelength_end + lambda_reference)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
             # part 8
-            sum_array = ne.evaluate("where(wavelength_end + lambda_current == 0, 0, ((wavelength_end + lambda_current) * k_start - k_end * (wavelength_start + lambda_current)) * log(abs(wavelength_end + lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
-            integral += np.sum(sum_array)
+            part_array = ne.evaluate("where(wavelength_end + lambda_current == 0, 0, ((wavelength_end + lambda_current) * k_start - k_end * (wavelength_start + lambda_current)) * log(abs(wavelength_end + lambda_current)) / (2 * (wavelength_start - wavelength_end) * (lambda_reference + lambda_current) * (lambda_reference - lambda_current)))")
+            integral += np.sum(part_array)
 
             # compute n
             return self.n_reference + (2 * (lambda_reference ** 2 - lambda_current ** 2) / np.pi) * integral
@@ -159,42 +173,54 @@ class SKKModel:
 
 
 def demo():
-    test_file_path = "examples/Quartz_Epara_300K_DOCCD.data_cm-1.tsv"
-    test_file_unit = "cm-1"
-    test_file_wavelength_column = 0
-    test_file_n_column = 1
-    test_file_k_column = 2
+    """
+        A demonstration function to calculate n using SKK model.
+    """
+
+    # INPUTS
+    data_file_path = "examples/Quartz_Epara_300K_DOCCD.data_cm-1.tsv"
+    data_file_unit = "cm-1"  # can be cm-1, micron, nm or A
+    data_wavelength_column = 0
+    data_n_column = 1  # We don't need n as input, but since it was in the Quartz_Epara data (obtained in a different way), we will use it to compare with our result on the graph.
+    data_k_column = 2
     lambda_reference = 16000
-    reference_unit = "cm-1"
+    lambda_reference_unit = "cm-1"
     n_reference = 1.545
-    # data read
-    test_file_read = DataPars(test_file_path)
-    test_file_read.file_pars_f()
-    test_data = test_file_read.file_body
-    test_data_wavelength = test_data[:, test_file_wavelength_column]
-    test_data_n = test_data[:, test_file_n_column]
-    test_data_k = test_data[:, test_file_k_column]
-    # UNITS
-    array_dict = dict()
-    array_dict["test_data_n"] = test_data_n
-    array_dict["test_data_k"] = test_data_k
-    test_data_wavelength, array_dict, is_it_reversed = convert_units(test_data_wavelength, array_dict, test_file_unit, "micron")
-    test_data_n = array_dict["test_data_n"]
-    test_data_k = array_dict["test_data_k"]
-    del array_dict
-    lambda_reference = units_conversion(lambda_reference, reference_unit, "micron")
-    # DATA extend
-    test_data_wavelength_before = copy.deepcopy(test_data_wavelength)
-    test_data_wavelength, test_data_k, test_data = data_extend(test_data_wavelength, test_data_k, [], lambda_reference)
-    # calc
-    n_array = np.zeros(len(test_data_wavelength))
-    for i, v in enumerate(test_data_wavelength):
-        my_SKK = SKKModel(v, lambda_reference, n_reference, test_data_wavelength, test_data_k, side_effect_smoothing=True)
+
+    # DATA READ (by our DataPars module)
+    data_file_read = DataPars(data_file_path)
+    data_file_read.file_pars_f()
+    our_data = data_file_read.file_body
+    del data_file_read
+    data_wavelength = our_data[:, data_wavelength_column]
+    data_n = our_data[:, data_n_column]
+    data_k = our_data[:, data_k_column]
+    del our_data
+
+    # UNITS CHANGE (as SKK formula are in microns and our Quartz_Epara data is in cm-1)
+    dict_with_arrays = dict()
+    dict_with_arrays["data_n"] = data_n
+    dict_with_arrays["data_k"] = data_k
+    data_wavelength, dict_with_arrays, _ = convert_units(data_wavelength, dict_with_arrays, data_file_unit, "micron")
+    data_n = dict_with_arrays["data_n"]
+    data_k = dict_with_arrays["data_k"]
+    del dict_with_arrays
+    lambda_reference = units_conversion(lambda_reference, lambda_reference_unit, "micron")
+
+    # DATA EXTEND (till lambda_reference if it is not included)
+    data_wavelength_before_extend = copy.deepcopy(data_wavelength)
+    data_wavelength, data_k, _ = data_extend(data_wavelength, data_k, [], lambda_reference)
+
+    # CALC (for each wavelength)
+    n_array = np.zeros(len(data_wavelength))
+    for i, v in enumerate(data_wavelength):
+        my_SKK = SKKModel(v, lambda_reference, n_reference, data_wavelength, data_k, side_effect_smoothing=True)
         n_array[i] = my_SKK.n_calc()
-    # plot
+
+    # PLOT
     fig, ax = plt.subplots()
-    ax.plot(test_data_wavelength_before, test_data_n, label='data n')
-    ax.plot(test_data_wavelength, n_array, label='calc n')
+    ax.plot(data_wavelength_before_extend, data_n, label='data n')
+    ax.plot(data_wavelength, n_array, label='calc n')
     ax.legend()
     plt.show()
 
