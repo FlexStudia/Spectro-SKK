@@ -1,5 +1,14 @@
 # coding: utf-8
 
+"""
+    This code is a public part of the Short Kramers-Kronig (SKK) and Shkuratov iterative model and is dedicated to the SKK part.
+
+    This code is distributed under a standard MIT license.
+    That is, it may be used freely with one condition:
+    all direct copies must contain the copyright notice “Copyright (c) 2025 Maria Gorbacheva, flex.studia.dev@gmail.com”
+    and a copy of the LICENSE file from its repository at https://github.com/FlexStudia/Spectro-SKK.
+"""
+
 # PACKAGES
 import copy
 import numpy as np
